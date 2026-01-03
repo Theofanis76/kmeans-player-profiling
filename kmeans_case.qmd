@@ -1,0 +1,412 @@
+---
+title: "Using K-Means Clustering in Soccer: An Applied Case Study"
+author: "Theofanis Tsitroulis"
+format:
+  html:
+    theme: cosmo
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: false
+    smooth-scroll: true
+    code-fold: true
+    code-tools: true
+    embed-resources: true
+---
+
+```{r}
+#| include: false
+library(reticulate)
+use_python("C:/Users/USER/anaconda3/python.exe", required = TRUE)
+```
+
+![](images/Quarto%20Banner.jpg){fig-align="center"}
+
+# Introduction and Dataset
+
+Individualized training is especially important in amateur soccer, where physical differences within squads are often large. This case study applies K-Means clustering to identify performance profiles using simple field tests.
+
+Data were collected in early pre-season and included countermovement jump, squat jump, 20 m sprint, and Illinois agility tests. Jump performance was measured using an accelerometer, whereas single-beam timing gates were used for the 20 m sprint and Illinois agility tests.
+
+## Libraries
+
+```{python}
+import pandas as pd
+import seaborn as sns 
+import matplotlib.pyplot as plt 
+from sklearn.cluster import KMeans 
+from sklearn.preprocessing import StandardScaler 
+```
+
+## Load the dataset
+
+```{python}
+df_raw = pd.read_csv("C:/Users/user/Desktop/R files/aver.csv")
+
+df_raw.head(2)
+```
+
+## Select relevant columns
+
+```{python}
+df= df_raw[["cmjmax", "sjmax", "sprint", "agi"]]
+df.head()
+```
+
+## Rename the columns
+
+```{python}
+df = df.rename({"cmjmax" : "Countermovement Jump",
+"sjmax" : "Squat Jump",
+"sprint": "20m Sprint",
+"agi": "Illinois Agility Test"}, axis = 1)
+
+df.head(2)
+```
+
+## Exploratory Data Analysis
+
+#### A basic descriptive analysis highlights substantial variability across all physical tests. This variation reflects one of the core challenges in amateur coaching: managing a squad with highly diverse physical profiles. Even before clustering, it’s evident that a one-size-fits-all training approach is unlikely to be effective.
+
+```{python}
+df.describe().round(2)
+```
+
+## Data Visualization
+
+#### Visual summaries highlight the wide range of physical abilities, reinforcing the need for individualized training—especially in amateur teams
+
+```{python}
+for col in df.select_dtypes("number").columns:
+  sns.histplot(data = df, x = col)
+  plt.show()
+```
+
+# Modelling the Data
+
+#### Standardizing the data ensures that no single test dominates the clustering process due to differences in units or magnitude
+
+```{python}
+std = StandardScaler()
+
+df_std = pd.DataFrame(
+    std.fit_transform(df),
+    columns=df.columns
+)
+
+df_std.head()
+```
+
+## Inverting Time-Based Metrics
+
+#### Sprint and agility times were inverted so that better (faster) results align with higher scores
+
+```{python}
+df_std = df_std.assign(
+    **{
+        "20m Sprint": df_std["20m Sprint"] * -1,
+        "Illinois Agility Test": df_std["Illinois Agility Test"] * -1
+    }
+)
+
+```
+
+# The KMeans Algorithm
+
+#### K-Means clustering was used to group players based on similar performance characteristics. The final model was selected using standard clustering diagnostics and visual inspection.
+
+## Inertia Plot (Elbow Method) - Practical Explanation
+
+#### The inertia plot helps select a reasonable number of clusters by showing when additional groups add little practical value.
+
+### Step 1 - Build a for loop
+
+#### A loop runs K-Means across different values of *k* and stores the inertia for each model.
+
+```{python}
+inertia_values = []
+
+for k in range(2, 10):
+    kmeans = KMeans(n_clusters = k, n_init = 'auto', random_state = 42)
+    kmeans.fit(df_std)
+    inertia_values.append(kmeans.inertia_)
+
+```
+
+### Step 2 – Store Inertia Values
+
+#### The inertia values are stored in a Pandas Series to make them easier to inspect and plot.
+
+```{python}
+
+inertia_series = pd.Series(inertia_values, index = range(2, 10))
+inertia_series
+```
+
+### Step 3 – Visualize the Elbow
+
+#### The inertia values are plotted across *k* to help identify the elbow point.
+
+```{python}
+inertia_series.plot(marker = 'o')
+plt.axvline(x=4, color='r', linestyle='--', label='Elbow at k=4')
+
+plt.title('Inertia Plot')
+plt.xlabel('Number of clusters (k)')
+plt.ylabel('Inertia')
+plt.legend()
+plt.show()
+```
+
+## Step 4 – Apply KMeans (k=4)
+
+#### KMeans was applied using 4 clusters as a starting point to explore how athletes might naturally group based on their test results.
+
+```{python}
+kmeans4 = KMeans(n_clusters = 4, n_init = "auto", random_state = 42)
+kmeans4.fit(df_std)
+```
+
+## Step 5 – Cluster Sizes
+
+#### After fitting the KMeans model, each player was assigned to one of the four clusters. The distribution of players was as follows:
+
+Cluster 3: 11 Players
+
+Cluster 1: 9 Players
+
+Cluster 0: 5 Players
+
+Cluster 2: 2 Players
+
+```{python}
+from collections import Counter
+
+Counter(kmeans4.labels_)
+```
+
+## Step 6 – Understanding Group Profiles
+
+#### Cluster centers represent the average performance profile of each group across all tests. They provide a simple way to understand what defines each cluster and how athletes differ from one another.
+
+```{python}
+kmeans4.cluster_centers_
+```
+
+### Step 7 – Visualizing Cluster Centers
+
+#### A heatmap was used to visualize the cluster centers across all tests. Values are standardized: **red indicates below-average performance**, and **blue indicates above-average**. This allows for quick interpretation of each group’s strengths and weaknesses.
+
+```{python}
+plt.figure(figsize = (10, 6))
+
+sns.heatmap(pd.DataFrame(kmeans4.cluster_centers_, columns = df_std.columns), annot=True, cmap="RdBu")
+```
+
+## Clusters Interpretation
+
+### Cluster 0 – High Overall Athleticism
+
+#### Above-average performance in all areas: jump, sprint, and agility.
+
+*Coaching focus:* Maintain current qualities through balanced training.
+
+### Cluster 1 – Low Overall Athleticism
+
+#### Below-average scores across all tests.
+
+*Coaching focus:* Emphasize general physical development and build foundational strength.
+
+### Cluster 2 – Power-Dominant, Speed-Limited
+
+#### Strong jump performance, but limited sprint and agility capacity.
+
+*Coaching focus:* Improve sprint mechanics, horizontal force production, and overall movement efficiency.
+
+### Cluster 3 – Speed-Oriented, Lower Power
+
+#### Above-average sprint and agility results with moderate jumping ability.
+
+*Coaching focus:* Develop power and explosiveness without sacrificing speed.
+
+## The Silhouette Score
+
+The silhouette score was used to assess cluster separation. While higher values indicate clearer separation, some overlap is expected in applied sports performance data.
+
+```{python}
+#| warning: false
+
+from sklearn.metrics import silhouette_score
+
+labels = kmeans4.fit_predict(df_std)
+score = silhouette_score(df_std, labels)
+
+print(f"Silhouette score for k=4: {score:.3f}")
+```
+
+# Rationale for Exploring a Three-Cluster Solution
+
+#### A three-cluster solution was explored to determine whether a simpler grouping could capture the main structure of the data. Fewer clusters can improve interpretability and practical use without meaningful loss of information.
+
+### KMeans Model with 3 Clusters
+
+```{python}
+kmeans3 = KMeans(n_clusters = 3, n_init = "auto", random_state = 42)
+kmeans3.fit(df_std)
+```
+
+### Cluster Sizes
+
+#### The number of players in each cluster was checked to see how evenly the groups were distributed.
+
+Cluster 1: 16 Players
+
+Cluster 2: 3 Players
+
+Cluster 0: 8 Players
+
+```{python}
+Counter(kmeans3.labels_)
+```
+
+### The Cluster Centers
+
+#### The cluster centers represent the average standardized performance for each group in the three-cluster model.
+
+```{python}
+kmeans3.cluster_centers_
+```
+
+### Visualize the data
+
+#### As before, red indicates below-average performance and blue indicates above-average, based on standardized values.
+
+```{python}
+plt.figure(figsize = (10, 6))
+
+sns.heatmap(pd.DataFrame(kmeans3.cluster_centers_, columns = df_std.columns), annot=True, cmap="RdBu")
+```
+
+## Three-Cluster Solution (k = 3)
+
+### Practical Interpretation
+
+The three-cluster solution provides clear physical profiles that can be translated into training priorities and support monitoring across the season. Cluster separation was assessed using the silhouette score, indicating acceptable structure for applied use.
+
+### Cluster 0 – High Overall Athleticism
+
+Above-average performance across jump, sprint, and agility tests.\
+**Coaching focus:** Maintain physical qualities, manage load, and support continued development.
+
+### Cluster 1 – Lower Power, Average Speed and Agility
+
+Below-average countermovement and squat jump performance, with sprint and agility values close to the squad average.\
+**Coaching focus:** Improve force production and general strength.
+
+### Cluster 2 – Power-Dominant, Speed- and Agility-Limited
+
+Above-average jump performance combined with clearly lower sprint and agility outcomes.\
+**Coaching focus:** Improve sprint mechanics, horizontal force production, and transfer of strength to on-field movement.
+
+## Player Group Assignments
+
+Each player was assigned to a cluster from the final model, enabling practical use in planning and monitoring.
+
+```{python}
+df_model = pd.concat([df_raw.NAME, df_std, pd.Series(kmeans3.labels_, name="Cluster")], axis = 1)
+df_model.head()
+```
+
+### Final Concatenation
+
+#### Descriptive labels were added to each player based on their cluster assignment. This makes the results easier to read and apply in practice.
+
+```{python}
+cluster_labels = {
+    0: "High Overall Athleticism",
+    1: "Lower Power, Avg Speed/Agility",
+    2: "Power-Dominant, Speed-Limited"
+}
+
+# Map the numeric cluster to the descriptive label
+df_model["Cluster Label"] = df_model["Cluster"].map(cluster_labels)
+
+# Preview the result
+df_model.head()
+```
+
+## Cluster 0 - High Overall Athleticism
+
+#### View players assigned to Cluster 0
+
+```{python}
+df_model.loc[df_model["Cluster"] == 0]
+```
+
+## Cluster 1 - Lower Power, Average Speed and Agility
+
+#### View players assigned to Cluster 1
+
+```{python}
+df_model.loc[df_model["Cluster"] == 1]
+```
+
+## Cluster 2 - Power-Dominant, Speed- and Agility-Limited
+
+#### View players assigned to Cluster 2
+
+```{python}
+df_model.loc[df_model["Cluster"] == 2]
+```
+
+## Clusters Visualization
+
+#### PCA is used to project the four standardized physical tests into two dimensions, allowing visualization of player distribution across the three clusters.
+
+```{python}
+from sklearn.decomposition import PCA
+import plotly.express as px
+
+features = [
+    "Countermovement Jump",
+    "Squat Jump",
+    "20m Sprint",
+    "Illinois Agility Test"
+]
+
+# PCA for visualization only
+pca = PCA(n_components=2)
+pca_scores = pca.fit_transform(df_model[features])
+
+df_pca = df_model.copy()
+df_pca["PC1"] = pca_scores[:, 0]
+df_pca["PC2"] = pca_scores[:, 1]
+
+# Explained variance
+explained_var = pca.explained_variance_ratio_.sum() * 100
+
+# Plot
+fig = px.scatter(
+    df_pca,
+    x="PC1",
+    y="PC2",
+    color="Cluster Label",
+    hover_name="NAME",
+    title=f"PCA Projection of Player Profiles (PC1–PC2 explain {explained_var:.1f}% variance)"
+)
+
+fig.update_layout(
+    template="simple_white",
+    legend_title_text="Cluster"
+)
+
+
+```
+
+# Conclusion & Limitations
+
+This project showed how simple field tests and K-Means clustering can identify clear performance profiles and support individualized training decisions.
+
+The analysis was based on basic field tests only. While accessible and practical, more advanced tools could provide deeper insight into neuromuscular qualities.
+
+Clustering highlights patterns in data but does not replace coaching judgment. Its value depends on informed interpretation and practical context.
